@@ -18,13 +18,14 @@ import java.util.Comparator;
 import java.util.List;
 
 public final class MainFrame extends JFrame {
-    private static final String VERSION = "1.4.1";
+    private static final String VERSION = "1.5.1";
     private static final DateTimeFormatter CLOCK = DateTimeFormatter.ofPattern("dd.MM.yyyy  HH:mm:ss");
     private static final DateTimeFormatter NEXT_DATE = DateTimeFormatter.ofPattern("dd.MM.yyyy");
 
     private final AppSettings settings;
     private final ScheduleStore store;
     private final AudioPlayer audioPlayer = new AudioPlayer();
+    private final KeepAwakeService keepAwakeService = new KeepAwakeService();
     private final ScheduleTableModel tableModel;
     private final JTable table;
 
@@ -49,6 +50,9 @@ public final class MainFrame extends JFrame {
     private final JCheckBox autoStartBox = new JCheckBox("Автоматичний запуск разом із системою");
     private final JCheckBox highPriorityBox = new JCheckBox("Максимальний пріоритет для SchoolBell (High)");
     private final JCheckBox minimizeToTrayBox = new JCheckBox("Згортати в системний трей при закритті");
+    private final JCheckBox keepAwakeWindowsBox = new JCheckBox("JNA / SetThreadExecutionState (Windows)");
+    private final JCheckBox keepAwakeLinuxBox = new JCheckBox("ProcessBuilder / системні утиліти ОС (Linux)");
+    private final JLabel keepAwakeStatusLabel = new JLabel("Статус: вимкнено");
 
     private final JCheckBox neptunAlertsBox = new JCheckBox("Тривоги — NEPTUN");
     private final JCheckBox alertsInUaBox = new JCheckBox("Тривоги — alerts.in.ua");
@@ -856,6 +860,8 @@ public final class MainFrame extends JFrame {
         configureCheckBox(autoStartBox, settings.autoStart);
         configureCheckBox(highPriorityBox, settings.highPriority);
         configureCheckBox(minimizeToTrayBox, settings.minimizeToTray);
+        configureCheckBox(keepAwakeWindowsBox, settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.WINDOWS_JNA);
+        configureCheckBox(keepAwakeLinuxBox, settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.LINUX_PROCESSBUILDER);
 
         gc.gridy++;
         card.add(scheduleEnabledBox, gc);
@@ -871,6 +877,29 @@ public final class MainFrame extends JFrame {
         card.add(priorityHint, gc);
         gc.gridy++;
         card.add(minimizeToTrayBox, gc);
+
+        gc.gridy++;
+        gc.insets = new Insets(16, 4, 4, 4);
+        card.add(sectionTitle("Емітація активності / екран завжди увімкнений"), gc);
+        gc.insets = new Insets(6, 4, 6, 4);
+
+        JLabel keepAwakeHint = new JLabel("<html><div style='width:500px'>SchoolBell блокує автоматичний сон і вимкнення дисплея, щоб заплановані дзвінки не були пропущені.</div></html>");
+        keepAwakeHint.setForeground(Color.WHITE);
+        keepAwakeHint.setFont(Theme.preferredFont(11f, Font.PLAIN));
+        gc.gridy++;
+        card.add(keepAwakeHint, gc);
+
+        gc.gridy++;
+        card.add(keepAwakeWindowsBox, gc);
+        gc.gridy++;
+        card.add(keepAwakeLinuxBox, gc);
+
+        keepAwakeStatusLabel.setForeground(Color.WHITE);
+        keepAwakeStatusLabel.setFont(Theme.preferredFont(11f, Font.PLAIN));
+        keepAwakeStatusLabel.setBorder(new EmptyBorder(0, 24, 2, 0));
+        gc.gridy++;
+        card.add(keepAwakeStatusLabel, gc);
+        refreshKeepAwakeUi();
 
         scheduleEnabledBox.addActionListener(e -> {
             settings.scheduleEnabled = scheduleEnabledBox.isSelected();
@@ -919,6 +948,30 @@ public final class MainFrame extends JFrame {
             log(settings.minimizeToTray ? "Згортання в трей увімкнено." : "Згортання в трей вимкнено.");
         });
 
+        keepAwakeWindowsBox.addActionListener(e -> {
+            if (!KeepAwakeService.isWindows()) {
+                keepAwakeWindowsBox.setSelected(false);
+                DarkDialogs.message(this, "Емітація активності", "JNA / SetThreadExecutionState доступний тільки у Windows.");
+                return;
+            }
+            AppSettings.KeepAwakeMethod wanted = keepAwakeWindowsBox.isSelected()
+                    ? AppSettings.KeepAwakeMethod.WINDOWS_JNA : AppSettings.KeepAwakeMethod.NONE;
+            if (wanted != AppSettings.KeepAwakeMethod.NONE) keepAwakeLinuxBox.setSelected(false);
+            changeKeepAwakeMethod(wanted);
+        });
+
+        keepAwakeLinuxBox.addActionListener(e -> {
+            if (!KeepAwakeService.isLinux()) {
+                keepAwakeLinuxBox.setSelected(false);
+                DarkDialogs.message(this, "Емітація активності", "ProcessBuilder / системні утиліти доступний тільки у Linux.");
+                return;
+            }
+            AppSettings.KeepAwakeMethod wanted = keepAwakeLinuxBox.isSelected()
+                    ? AppSettings.KeepAwakeMethod.LINUX_PROCESSBUILDER : AppSettings.KeepAwakeMethod.NONE;
+            if (wanted != AppSettings.KeepAwakeMethod.NONE) keepAwakeWindowsBox.setSelected(false);
+            changeKeepAwakeMethod(wanted);
+        });
+
         UIComponents.ModernButton openConfig = new UIComponents.ModernButton("Відкрити папку налаштувань");
         openConfig.addActionListener(e -> runSystemAction(
                 () -> SystemIntegration.openFolder(store.configDir()),
@@ -930,6 +983,64 @@ public final class MainFrame extends JFrame {
         gc.insets = new Insets(12, 4, 4, 4);
         card.add(openConfig, gc);
         return card;
+    }
+
+    private void refreshKeepAwakeUi() {
+        boolean windows = KeepAwakeService.isWindows();
+        boolean linux = KeepAwakeService.isLinux();
+        // Обидва методи завжди видимі білим текстом. На несумісній ОС клік дає пояснення і не вмикає метод.
+        keepAwakeWindowsBox.setEnabled(true);
+        keepAwakeLinuxBox.setEnabled(true);
+        keepAwakeWindowsBox.setSelected(settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.WINDOWS_JNA);
+        keepAwakeLinuxBox.setSelected(settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.LINUX_PROCESSBUILDER);
+
+        if (settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.WINDOWS_JNA && !windows) {
+            keepAwakeStatusLabel.setText("Статус: метод Windows збережений, але поточна ОС не Windows.");
+        } else if (settings.keepAwakeMethod == AppSettings.KeepAwakeMethod.LINUX_PROCESSBUILDER && !linux) {
+            keepAwakeStatusLabel.setText("Статус: метод Linux збережений, але поточна ОС не Linux.");
+        } else if (keepAwakeService.activeMethod() != AppSettings.KeepAwakeMethod.NONE) {
+            keepAwakeStatusLabel.setText("Статус: " + keepAwakeService.statusMessage());
+        } else {
+            keepAwakeStatusLabel.setText("Статус: вимкнено");
+        }
+    }
+
+    private void changeKeepAwakeMethod(AppSettings.KeepAwakeMethod wanted) {
+        keepAwakeWindowsBox.setEnabled(false);
+        keepAwakeLinuxBox.setEnabled(false);
+        keepAwakeStatusLabel.setText(wanted == AppSettings.KeepAwakeMethod.NONE
+                ? "Статус: вимкнення…" : "Статус: запуск…");
+
+        new SwingWorker<KeepAwakeService.Result, Void>() {
+            @Override protected KeepAwakeService.Result doInBackground() {
+                return keepAwakeService.apply(wanted);
+            }
+
+            @Override protected void done() {
+                try {
+                    KeepAwakeService.Result result = get();
+                    if (result.success()) {
+                        settings.keepAwakeMethod = wanted;
+                        saveQuietly();
+                        log(result.message());
+                    } else {
+                        settings.keepAwakeMethod = AppSettings.KeepAwakeMethod.NONE;
+                        keepAwakeService.apply(AppSettings.KeepAwakeMethod.NONE);
+                        saveQuietly();
+                        log("ПОМИЛКА емітації активності: " + result.message());
+                        DarkDialogs.message(MainFrame.this, "Емітація активності", result.message());
+                    }
+                } catch (Exception ex) {
+                    settings.keepAwakeMethod = AppSettings.KeepAwakeMethod.NONE;
+                    keepAwakeService.apply(AppSettings.KeepAwakeMethod.NONE);
+                    saveQuietly();
+                    String message = ex.getMessage() == null ? "Невідома помилка." : ex.getMessage();
+                    log("ПОМИЛКА емітації активності: " + message);
+                    DarkDialogs.message(MainFrame.this, "Емітація активності", message);
+                }
+                refreshKeepAwakeUi();
+            }
+        }.execute();
     }
 
     private UIComponents.RoundedPanel buildJournalCard() {
@@ -1012,6 +1123,26 @@ public final class MainFrame extends JFrame {
             runSystemAction(() -> SystemIntegration.setAutoStart(true), result -> {
                 if (!result.success()) log("ПОМИЛКА автозапуску: " + result.message());
             });
+        }
+        if (settings.keepAwakeMethod != AppSettings.KeepAwakeMethod.NONE) {
+            new SwingWorker<KeepAwakeService.Result, Void>() {
+                @Override protected KeepAwakeService.Result doInBackground() {
+                    return keepAwakeService.apply(settings.keepAwakeMethod);
+                }
+                @Override protected void done() {
+                    try {
+                        KeepAwakeService.Result result = get();
+                        if (result.success()) {
+                            log(result.message());
+                        } else {
+                            log("ПОМИЛКА емітації активності: " + result.message());
+                        }
+                    } catch (Exception ex) {
+                        log("ПОМИЛКА емітації активності: " + (ex.getMessage() == null ? "невідома помилка" : ex.getMessage()));
+                    }
+                    refreshKeepAwakeUi();
+                }
+            }.execute();
         }
     }
 
@@ -1346,6 +1477,7 @@ public final class MainFrame extends JFrame {
         if (scheduler != null) scheduler.close();
         if (neptunAlertService != null) neptunAlertService.close();
         if (alertsInUaAlertService != null) alertsInUaAlertService.close();
+        keepAwakeService.close();
         audioPlayer.close();
         if (trayIcon != null) {
             try { SystemTray.getSystemTray().remove(trayIcon); } catch (Exception ignored) {}

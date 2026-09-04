@@ -1,0 +1,18 @@
+# Java build output
+build/
+dist/
+*.class
+
+# Downloaded runtime libraries
+lib/*.jar
+
+# Local secrets / settings
+alerts-in-ua.token
+schedule.properties
+
+# IDE / OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

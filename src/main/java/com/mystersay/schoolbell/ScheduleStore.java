@@ -36,6 +36,7 @@ public final class ScheduleStore {
             settings.autoStart = Boolean.parseBoolean(p.getProperty("app.autostart", "false"));
             settings.highPriority = Boolean.parseBoolean(p.getProperty("app.highPriority", "false"));
             settings.minimizeToTray = Boolean.parseBoolean(p.getProperty("app.minimizeToTray", "true"));
+            settings.keepAwakeMethod = AppSettings.KeepAwakeMethod.parse(p.getProperty("app.keepAwakeMethod", "NONE"));
 
             String providerRaw = p.getProperty("alerts.provider", "").trim();
             if (!providerRaw.isBlank()) {
@@ -97,6 +98,7 @@ public final class ScheduleStore {
         p.setProperty("app.autostart", Boolean.toString(settings.autoStart));
         p.setProperty("app.highPriority", Boolean.toString(settings.highPriority));
         p.setProperty("app.minimizeToTray", Boolean.toString(settings.minimizeToTray));
+        p.setProperty("app.keepAwakeMethod", settings.keepAwakeMethod.name());
 
         p.setProperty("alerts.enabled", Boolean.toString(settings.alertProvider != AppSettings.AlertProvider.NONE));
         p.setProperty("alerts.provider", settings.alertProvider.name());

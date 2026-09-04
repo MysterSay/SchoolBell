@@ -29,6 +29,22 @@ public final class AppSettings {
         }
     }
 
+
+    public enum KeepAwakeMethod {
+        NONE,
+        WINDOWS_JNA,
+        LINUX_PROCESSBUILDER;
+
+        public static KeepAwakeMethod parse(String value) {
+            if (value == null || value.isBlank()) return NONE;
+            try {
+                return KeepAwakeMethod.valueOf(value.trim().toUpperCase(Locale.ROOT));
+            } catch (Exception ex) {
+                return NONE;
+            }
+        }
+    }
+
     public final List<Lesson> lessons = new ArrayList<>();
     public final List<ScheduledBell> bells = new ArrayList<>();
     public Path startSound;
@@ -38,6 +54,7 @@ public final class AppSettings {
     public boolean autoStart = false;
     public boolean highPriority = false;
     public boolean minimizeToTray = true;
+    public KeepAwakeMethod keepAwakeMethod = KeepAwakeMethod.NONE;
 
     public AlertProvider alertProvider = AlertProvider.NONE;
     public String alertOblast = "";
